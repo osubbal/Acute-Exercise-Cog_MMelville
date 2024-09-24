@@ -1,0 +1,1546 @@
+---
+title: "MAE_Data_Analysis"
+author: "Michael Melville"
+date: "2024-09-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Global setup options
+knitr::opts_chunk$set(
+  echo = FALSE,      # Hide code in output
+  warning = FALSE,   # Hide warnings
+  message = FALSE    # Hide messages
+)
+options(scipen = 999)  # Disable scientific notation
+```
+
+
+# Load Necessary Libraries
+
+```{r, warning=FALSE, message=FALSE, include=FALSE}
+# Function to check if packages are installed and install them if needed
+install_if_missing <- function(package) {
+  if (!require(package, character.only = TRUE)) {
+    install.packages(package, dependencies = TRUE)
+    library(package, character.only = TRUE)
+  }
+}
+
+# List of required packages
+packages <- c("dplyr", "ggplot2", "ggpubr", "rstatix", "readxl", "table1",
+              "lme4", "multcomp", "lmerTest", "interactions", "corrplot",
+              "car", "patchwork", "moments", "tidyr")
+
+# Install missing packages and load them
+lapply(packages, install_if_missing)
+
+# Load all packages using lapply
+lapply(packages, library, character.only = TRUE)
+
+# Creating Negate Operator for Later Use
+`%!in%` <- Negate(`%in%`)  
+```
+
+# Data Import
+
+See GitHub_Export/Documentation for information on provided data. 
+
+```{r data_import}
+# Function to find "GitHub_Export directory
+set_project_directory <- function() {
+  current_dir <- normalizePath(getwd(), winslash = "/")
+  while (!basename(current_dir) == "GitHub_Export" && nchar(current_dir) > 1) {
+    current_dir <- dirname(current_dir)
+    setwd(current_dir)
+  }
+  if (!basename(getwd()) == "GitHub_Export") {
+    stop("GitHub_Export directory not found in the path")
+  }
+}
+
+# Use the function to set the working directory
+set_project_directory()
+
+# Import the data
+All_Final <- read.csv("Data/All_Processed.csv")
+Flanker_Trial <- read.csv("Data/Flanker_Trial.csv")
+
+# Checking the first few rows of the imported data
+head(All_Final)
+head(Flanker_Trial)
+```
+# Data Cleaning
+
+```{r}
+# Reformatting "DateFinished" column
+All_Final$DateFinished <- as.Date(All_Final$DateFinished - 2, origin = "1899-12-30")
+
+# Removing Extra Column
+All_Final <- All_Final %>% dplyr::select(Sub_ID:last_col())
+
+# Removing Participant #10 (Failed to complete Vigorous Condition) and extra row
+All_Final <- All_Final %>% filter(Sub_ID %!in% c(10.1, 10.2, 10.3, 2227.3))
+```
+
+
+
+
+
+
+# Table 1 - Demographic Data
+
+-Jena Moody's functions utilized here
+-Table copied and pasted and then manually formatted in Microsoft Word for final version
+
+```{r}
+# Importing Demographic Data
+Demographic_Table<- All_Final %>% 
+  dplyr::select(c(Sub_ID, SedTimeTypDay:Race))
+
+# Cleaning Data
+  Demographic_Table$Sub_ID<- as.integer(Demographic_Table$Sub_ID)
+  
+  # Removing duplicated rows
+  Demographic_Table<- Demographic_Table[!duplicated(Demographic_Table),]
+  
+  # Handling participant #16 (2 rows bc they completed 2 light appointments)
+  Demographic_Table<- Demographic_Table[-which(Demographic_Table$Sub_ID == "16")[2],]
+  
+  # Changing NA Values to be 0 min within the table for IPAQ-SF
+  Demographic_Table[is.na(Demographic_Table)] = 0 
+  
+  # Converting all Minute Measures to Hours
+  Demographic_Table <- Demographic_Table %>%
+  mutate(SedTimeTypDay = SedTimeTypDay / 60,
+         WalkTimeTotMin = WalkTimeTotMin / 60,
+         ModTimeTotMin = ModTimeTotMin / 60,
+         VigTimeTotMin = VigTimeTotMin / 60)
+
+# Preparing Labels for Table
+label(Demographic_Table$SedTimeTypDay) <- "Sedentary Time"
+units(Demographic_Table$SedTimeTypDay)<- "hours/day"
+
+label(Demographic_Table$WalkTimeTotMin)<- "Time Spent Walking"
+units(Demographic_Table$WalkTimeTotMin)<- "hours/day"
+
+label(Demographic_Table$ModTimeTotMin)<- "Time Spent at Moderate Intensity"
+units(Demographic_Table$ModTimeTotMin)<- "hours/day"
+
+label(Demographic_Table$VigTimeTotMin)<- "Time Spent at Vigorous Intensity"
+units(Demographic_Table$VigTimeTotMin)<- "hours/day"
+
+label(Demographic_Table$HtM)<- "Height"
+units(Demographic_Table$HtM)<- "M"
+
+label(Demographic_Table$WtKg)<- "Weight"
+units(Demographic_Table$WtKg)<- "Kg"
+
+label(Demographic_Table$BMI)<- "BMI"
+units(Demographic_Table$BMI)<- "Kg/m^2"
+
+units(Demographic_Table$Education)<- "years"
+
+label(Demographic_Table$CESDScore)<- "CES-D"
+
+units(Demographic_Table$Age)<- "years"
+
+# Creating Custom Labels (Jena's Function)
+rndr <- function(x, name, ...) {
+  if (!is.numeric(x)) return(render.categorical.default(x))
+  what <- switch(name,
+                 SedTimeTypDay = "Mean (SD)",
+                 WalkTimeTotMin = "Mean (SD)",
+                 ModTimeTotMin = "Mean (SD)",
+                 VigTimeTotMin = "Mean (SD)",
+                 Age = "Mean (SD)",
+                 HtM = "Mean (SD)",
+                 WtKg = "Mean (SD)",
+                 BMI = "Mean (SD)",
+                 CESDScore = "Mean (SD)",
+                 Education = "Mean (SD)"
+  )
+  parse.abbrev.render.code(c("", what))(x)
+}
+
+# 
+table1(
+  ~ Age + Education + CESDScore + HtM + WtKg + BMI + SedTimeTypDay + WalkTimeTotMin +
+    ModTimeTotMin + VigTimeTotMin + Race |
+    Sex,
+  data = Demographic_Table,
+  render = rndr,
+  topclass = "Rtable1-times",
+  export = "Output/Demographic_Table.csv",
+  footnote = "Sedentary,Walking,Moderate Intensity,Vigorous Intensity time estimates per day
+       were collected as subjective estimates through the IPAQ-SF. Notes: BMI= body mass index; CES-D= Center for Epidemiological Studies Depression Scale.",
+  caption = "Characteristics of Study Participants",
+  export = "Demographic_Table.csv"
+)
+```
+
+# Table 2 - Exercise Manipulation Summary
+
+-HR continuously collected and RPE collected every min (except for control condition where RPE collected at beginning and end)
+
+-Mean HR/RPE computed during each session for each participant
+-Mean (SD) then computed across all participants 
+
+-Example: Mean of Sub 1 computed during their rest appt (70 BPM; 6 RPE)
+-Example: Mean and SD of ALL individual rest means computed (HR/RPE) computed
+
+-Table data copied and pasted into Microsoft Word and manually formatted for final version
+
+```{r}
+# Importing HR and RPE Data
+HR_Validation<- All_Final %>%
+  dplyr::select(Sub_ID:SD_Percent_HRR)
+
+# Cleaning Data
+
+  # Identifying NA Values (will be handled with na.rm = TRUE below)
+  HR_Validation[which(is.na(HR_Validation$Avg_RPE)),1]
+  HR_Validation[which(is.na(HR_Validation$Avg_HR)),1]
+  
+# Creating Empty df to add summary HR and RPE metrics to
+HR_Validation_Summary <-
+    data.frame(
+      "Condition",
+      "Mean Mean RPE",
+      "Mean Mean HR",
+      "SD Mean HR",
+      "Mean Percentage of Time in Zone",
+      "Mean Lower THR Bound",
+      "Mean Upper THR Bound",
+      "SD Mean RPE",
+      "Mean Mean %HRR",
+      "SD Mean %HRR"
+    )
+
+colnames(HR_Validation_Summary)<- HR_Validation_Summary[1,]
+HR_Validation_Summary[1,]<- NA
+HR_Validation_Summary[1:3,]<- NA
+HR_Validation_Summary$Condition<- c("Control", "Light Exercise", "Vigorous Exercise")
+
+# Adding Summary Data to Table
+
+  # Control
+   HR_Validation_Control<- HR_Validation %>% filter(Cond=="Control")
+  HR_Validation_Summary[1,2]<- round(mean(as.numeric(HR_Validation_Control$Avg_RPE), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[1,3]<- round(mean(as.numeric(HR_Validation_Control$Avg_HR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[1,4]<- round(sd(as.numeric(HR_Validation_Control$Avg_HR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[1,5]<- round(mean(as.numeric(HR_Validation_Control$Percentage_Time_In_Zone), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[1,6]<- round(mean(as.numeric(HR_Validation_Control$Avg_Lower_THR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[1,7]<- round(mean(as.numeric(HR_Validation_Control$Avg_Upper_THR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[1,8]<- round(sd(as.numeric(HR_Validation_Control$Avg_RPE), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[1,9]<- round(mean(as.numeric(HR_Validation_Control$Mean_Percent_HRR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[1,10]<- round(sd(as.numeric(HR_Validation_Control$Mean_Percent_HRR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[1,c(5,6,7)]<- "Not Applicable"
+
+
+
+  # Light
+  HR_Validation_Light<- HR_Validation %>% filter(Cond=="Light")
+  HR_Validation_Summary[2,2]<- round(mean(as.numeric(HR_Validation_Light$Avg_RPE), na.rm = TRUE),digits=2)
+  HR_Validation_Summary[2,3]<- round(mean(as.numeric(HR_Validation_Light$Avg_HR), na.rm = TRUE),digits=2)
+  HR_Validation_Summary[2,4]<- round(mean(as.numeric(HR_Validation_Light$SD_HR), na.rm = TRUE),digits=2)
+  HR_Validation_Summary[2,5]<- round(mean(as.numeric(HR_Validation_Light$Percentage_Time_In_Zone), na.rm = TRUE),digits=3)
+  HR_Validation_Summary[2,6]<- round(mean(as.numeric(HR_Validation_Light$Avg_Lower_THR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[2,7]<- round(mean(as.numeric(HR_Validation_Light$Avg_Upper_THR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[2,8]<- round(mean(as.numeric(HR_Validation_Light$SD_RPE), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[2,9]<- round(mean(as.numeric(HR_Validation_Light$Mean_Percent_HRR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[2,10]<- round(mean(as.numeric(HR_Validation_Light$SD_Percent_HRR), na.rm = TRUE), digits=2)
+
+
+
+  # Vigorous
+  HR_Validation_Vig<- HR_Validation %>% filter(Cond=="Vigorous")
+  HR_Validation_Summary[3,2]<- round(mean(as.numeric(HR_Validation_Vig$Avg_RPE), na.rm = TRUE),digits=2)
+  HR_Validation_Summary[3,3]<- round(mean(as.numeric(HR_Validation_Vig$Avg_HR), na.rm = TRUE),digits=2)
+  HR_Validation_Summary[3,4]<- round(mean(as.numeric(HR_Validation_Vig$SD_HR), na.rm = TRUE),digits = 2)
+  HR_Validation_Summary[3,5]<- round(mean(as.numeric(HR_Validation_Vig$Percentage_Time_In_Zone), na.rm = TRUE),digits=3)
+  HR_Validation_Summary[3,6]<- round(mean(as.numeric(HR_Validation_Vig$Avg_Lower_THR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[3,7]<- round(mean(as.numeric(HR_Validation_Vig$Avg_Upper_THR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[3,8]<- round(mean(as.numeric(HR_Validation_Vig$SD_RPE), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[3,9]<- round(mean(as.numeric(HR_Validation_Vig$Mean_Percent_HRR), na.rm = TRUE), digits=2)
+  HR_Validation_Summary[3,10]<- round(mean(as.numeric(HR_Validation_Vig$SD_Percent_HRR), na.rm = TRUE), digits=2)
+
+#Printing Summary Table   
+HR_Validation_Summary
+```
+# Results - Exercise Manipulation
+
+-I have code for One-Way ANOVAs for the main effect of condition on Avg HR/RPE
+-We chose not to incorporate these results into the paper
+  -Missing data (HR: 3.1, RPE: 11.2, 18.2, 18.3)
+  -Complicated scenario (Participant 16 completed light condition twice)
+  -Assumptions of ANOVA violated 
+    -(RPE data severely violates normality assumptions)
+    -(HR data more variable for exercise versus rest)
+
+# Results - Continuous MST
+
+-Followed this approach:
+  1.) Completed ANOVA and Post-Hoc BEFORE verifying assumptions
+  2.) Verified assumptions and removed outliers (>3 sd from mean)
+  3.) Re-did ANOVA and Post-Hoc With Outliers removed
+
+-Retained original analysis if outliers didn't impact results
+-Primary Outcome Measures: LDI (Lure Bins 1-3)
+
+## 1.) ANOVA/Post-Hoc
+```{r}
+# Cleaning Data
+
+  # Lure Discrimination Index (LDI)
+  MST_ANOVA<- All_Final %>% dplyr::select(Cond, Lure.Discrimination.Index.Lure.Bin.3, 
+                                   Lure.Discrimination.Index.Lure.Bin.2, 
+                                   Lure.Discrimination.Index.Lure.Bin.1, Sub_ID)
+  colnames(MST_ANOVA)<- c("Condition", "Low", "Medium", "High", "Sub_ID")
+  LDI_MST<- MST_ANOVA %>% 
+    gather("Lure_Similarity", "Lure_Discrimination_Index", 2:4)
+  LDI_MST<- LDI_MST %>% na.omit()
+  LDI_MST$Sub_ID<- as.integer(as.character(LDI_MST$Sub_ID))
+  LDI_MST<- subset(LDI_MST, subset= Sub_ID%!in% c(3)) #3 had missing MST data for 1 appt
+  
+  # Recognition Memory (RM)
+  RM_MST<- All_Final %>% 
+    dplyr::select(Cond, Sub_ID, Recognition.Memory)
+  RM_MST$Sub_ID <- as.integer(as.character(RM_MST$Sub_ID))
+  RM_MST<- subset(RM_MST, subset = Sub_ID%!in% c(3))
+  RM_MST_NA<- which(is.na(RM_MST$Recognition.Memory))
+  RM_MST <- RM_MST[-RM_MST_NA,]
+
+
+# Two-Way ANOVA for effect of (Condition and Lure Similarity) on LDI
+options(scipen=100) 
+(MST_AOV<- get_anova_table(anova_test(data = LDI_MST, 
+                                     wid=Sub_ID, 
+                                     dv =Lure_Discrimination_Index, 
+                                     within=c(Condition, Lure_Similarity))))
+
+# Post-Hoc Comparisons (LDI) - (Considering effect of lure similarity on LDI)
+options(scipen=1000000000) #Removes scientific notation
+(Lure_Similarity_Post_Hoc<- LDI_MST%>%
+          group_by(Condition) %>% 
+          pairwise_t_test(Lure_Discrimination_Index ~ Lure_Similarity, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+
+# One-Way ANOVA for effect of (Condition) on RM 
+options(scipen=100) 
+(RM_AOV<- get_anova_table(anova_test(data = RM_MST, 
+                                     wid=Sub_ID, 
+                                     dv =Recognition.Memory, 
+                                     within=c(Cond))))
+```
+## 2.) Assumption Verification/Outlier Removal - LDI
+
+LDI:
+-Normality violated for (Control and Vigorous Low Similarity)
+-Equal Variance Test not violated
+-Outlier detected (# 7) and removed
+
+RM:
+-Normality severely violated
+-Equal Variance Test not violated
+-Chose not to perform outlier removal etc. due to severe violation of ANOVA assumptions
+-Additionally, this wasn't a primary measure of interest
+
+```{r}
+# LDI
+  # Verifying Normality Assumption (grouped by both Condition and Lure Similarity)
+  (normality_MST<-LDI_MST %>%
+  group_by(Condition, Lure_Similarity) %>%
+  shapiro_test(Lure_Discrimination_Index) %>% 
+  data.frame()) #Only violated for Control and Vigorous Low Condition 
+  
+  # Equal Variance Test (Levene's test)
+  (equalvar_MST<- leveneTest(Lure_Discrimination_Index ~ interaction(Condition,Lure_Similarity),data=LDI_MST)) #Not Violated
+  
+  # Outlier Removal (3 sd)
+  (outlier_removed_MST<- LDI_MST %>% 
+    group_by(Condition, Lure_Similarity) %>% 
+    mutate(z_score=scale(Lure_Discrimination_Index)) %>%#Note- 7 is an outlier
+    ungroup())
+  outlier_subid_MST<-outlier_removed_MST[which((outlier_removed_MST$z_score>3 | outlier_removed_MST$z_score< (-3))==TRUE),2]
+  outlier_subid_MST<- as.integer(outlier_subid_MST$Sub_ID)
+  outlier_removed_MST<- subset(outlier_removed_MST, subset= outlier_removed_MST$Sub_ID %!in% c(outlier_subid_MST))
+  
+# RM
+  
+  # Verifying Normality Assumption (grouped by Condition)
+  (normality_MST_RM<-RM_MST %>%
+  group_by(Cond) %>%
+  shapiro_test(Recognition.Memory) %>% 
+  data.frame()) #Significantly violated
+  
+  # Equal Variance Test (Levene's test)
+  (equalvar_MST_RM<- leveneTest(Recognition.Memory ~ Cond,data=RM_MST)) #Not Violated
+```
+
+## 3.) ANOVA/Post-Hoc
+
+LDI:
+-Results unchanged by outlier removal
+-Initial ANOVA results utilized in manuscript
+
+```{r}
+# Two-Way ANOVA for effect of (Condition and Lure Similarity) on LDI
+options(scipen=100) 
+(MST_AOV<- get_anova_table(anova_test(data = outlier_removed_MST, 
+                                     wid=Sub_ID, 
+                                     dv =Lure_Discrimination_Index, 
+                                     within=c("Condition" , "Lure_Similarity"))))
+
+
+#Post-Hoc Comparisons (LDI) - (Considering effect of lure similarity on LDI)
+Lure_Similarity_Post_Hoc<- outlier_removed_MST%>%
+          group_by(Condition) %>% 
+          pairwise_t_test(Lure_Discrimination_Index ~ Lure_Similarity, paired= TRUE,
+                          p.adjust.method= "bonferroni")
+options(scipen=1000000000) #Removes scientific notation
+Lure_Similarity_Post_Hoc
+```
+
+## 4.) Plotting
+
+### *LDI versus Condition (Facet wrapped by Lure Similarity)
+
+-outliers greater than 3 sd included in these plots (results not impacted by inclusion)
+-unadjusted p-values utilized
+
+```{r}
+# Factoring Lure Similarity Levels
+LDI_MST$Lure_Similarity<- factor(LDI_MST$Lure_Similarity,
+                                 levels=c("High", "Medium", "Low"))
+                                 
+# Running Paired T-Tests for LDI by Condition
+stat.test_MST_Condition<- compare_means(Lure_Discrimination_Index ~ Condition, 
+                                        data= LDI_MST, paired = TRUE, 
+                                        method="t.test", group.by="Lure_Similarity",
+                                        label="p.signif",p.adjust.method = "none" )
+
+# LDI Box Plot Faced by Condition
+(MST_LDI_Condition<- ggboxplot(lwd = 3.0, LDI_MST, x= "Condition", 
+                              y= "Lure_Discrimination_Index", 
+                              color = "Lure_Similarity",
+                              outlier.size = 5)+
+          labs(y= "Lure Discrimination Index", x="Condition")+
+          scale_x_discrete(limits=c("Control", "Light", "Vigorous"))+
+          scale_y_continuous(limits=c(0,1.0), 
+                             breaks= c(0, 0.10, 0.20, 0.30, 0.40, 
+                                       0.50, 0.60, 0.70, 0.80, 0.90, 1.00))+
+  facet_wrap(~Lure_Similarity)+
+  labs(color="Lure Similarity")+
+  theme(text = element_text(size = 80))+
+  grids(linetype = "dashed", size = 1.0, color = "grey"))
+```
+
+
+
+### *LDI versus Lure Similarity (Facet wrapped by Condition)
+
+-outliers greater than 3 sd included in these plots (results not impacted by inclusion)
+-unadjusted p-values utilized
+
+```{r}
+# Factoring Lure Similarity Levels
+LDI_MST$Condition<- factor(LDI_MST$Condition,
+                                       levels=c("Vigorous", "Light", "Control"))
+
+# Running Paired T-Tests for LDI by Condition
+stat.test_MST_Lure_Similarity<- compare_means(Lure_Discrimination_Index ~ Lure_Similarity, 
+                                        data= LDI_MST, paired = TRUE, 
+                                        method="t.test", group.by="Condition",
+                                        label="p.signif", p.adjust.method = "none" )
+
+# LDI Box Plot Faced by Lure Similarity 
+(MST_LDI_Lure_Similarity<- ggboxplot(lwd = 1.5, 
+                                    LDI_MST, 
+                                    x= "Lure_Similarity", 
+                                    y= "Lure_Discrimination_Index", 
+                                    color = "Condition")+
+          labs(y= "LDI = [p(Similar | Lure)- p(Similar | Foil)]", 
+               x="Lure Similarity")+
+          scale_x_discrete(limits=c("High","Medium","Low"))+
+          scale_y_continuous(limits=c(0,1.20), 
+                             breaks= c(0, 0.10, 0.20, 0.30, 0.40, 
+                                       0.50, 0.60, 0.70, 0.80, 0.90,1.0))+
+  facet_wrap(~Condition)+
+  labs(color="Condition")+
+  stat_pvalue_manual(stat.test_MST_Lure_Similarity, label="p.signif",
+                     tip.length=0.01, hide.ns=TRUE, 
+                     y.position = 1.05, step.increase=0.075,
+                     step.group.by="Condition", bracket.size = 1.0,
+                     label.size=12.0)+
+  theme(text = element_text(size = 40))+
+    grids(linetype = "dashed"))
+```
+### *Proportion of Responses
+```{r}
+# Cleaning Data
+responses_MST<- All_Final %>% 
+  dplyr::select(Cond, 
+         TO_rate,
+         TS_rate, 
+         TN_rate, 
+         LO_rate, 
+         LS_rate,
+         LN_rate,
+         FO_rate, 
+         FS_rate, 
+         FN_rate, 
+         Sub_ID) %>% 
+  subset(subset=Sub_ID %!in% c(3.1, 3.2, 3.3)) %>% 
+  gather("Response", "Rate of Response", 2:10)
+responses_MST<- as.data.frame(responses_MST)
+responses_MST$Sub_ID<- as.integer(responses_MST$Sub_ID)
+
+#Making Box Plot of Proportion of Responses
+(responses_MST1<- ggboxplot(lwd=1.5, responses_MST, x="Response", y="Rate of Response",
+                           color= "Cond")+
+  scale_y_continuous(limits=c(0,1.0), breaks=c(seq(from=0, to=1, by=0.1)))+
+  labs(y="Response Rate", x="Stimuli and Response Pairings")+
+  scale_x_discrete(labels=c("TO", "TS", "TN", "LO", "LS", "LN", "FO", "FS", "FN"))+
+  labs(color="Condition")+
+  theme_pubr()+
+  theme(text = element_text(size = 50))+
+  grids(linetype = "dashed", color = "darkgray"))
+```
+
+### *Saving Plots
+
+```{r}
+# Use the function to set the working directory
+set_project_directory()
+
+ggsave("Output/MST_LDI_Condition.eps",plot= MST_LDI_Condition, dpi=1200,
+       width=38, height=18, units = "in")
+
+ggsave("Output/Responses_MST.eps", plot=responses_MST1, dpi=1200, width=26, height=24, units = "in")
+```
+
+## 5.) Correlations
+
+-Goal of this analysis was to explore correlation between exercise induced changes in LDI
+-Computed change scores (Vig - Rest, Vig - Light, Light - Rest) and plotted against baseline level of PA
+
+Variables: Overall LDI (across lure bin difficulty) for rest, light, and vigorous conditions, and total IPAQ METs
+
+
+### *Data Cleaning
+```{r}
+# Data Cleaning
+
+  # IPAQ Data Import
+  set_project_directory()
+  IPAQ_Measure <-readxl::read_excel("Data/IPAQ_SF.xlsx")
+  IPAQ_Measure <-IPAQ_Measure[1:19, ] 
+  names(IPAQ_Measure)[names(IPAQ_Measure) == "SubID"] <- "Sub_ID"
+  
+  # MST Data Import
+  B_M_Corr <- All_Final %>% dplyr::select(c(Sub_ID, Cond,Lure.Discrimination.Index:Lure.Discrimination.Index.Lure.Bin.1))
+  B_M_Corr$Sub_ID <- as.integer(B_M_Corr$Sub_ID)
+  B_M_Corr <- B_M_Corr %>% na.omit()
+
+  # Merging
+  B_M <- left_join(B_M_Corr, IPAQ_Measure, by = "Sub_ID")
+  
+  # Selecting Important Columns
+  B_M <- B_M %>% 
+    dplyr::select(c(Sub_ID, Cond, Lure.Discrimination.Index:Lure.Discrimination.Index.Lure.Bin.1,
+                    TotPAMET))
+
+  # Removing participants 3, 10, and an extra row
+  B_M <- subset(B_M, subset = Sub_ID %!in% c(3, 10, 2227))
+
+  # Converting from long to wide format (1 participant per row)
+  B_M_Wide <- pivot_wider(
+    data = B_M,
+    id_cols = Sub_ID,
+    names_from = Cond,
+    values_from = c(
+      Lure.Discrimination.Index,
+      Lure.Discrimination.Index.Lure.Bin.3,
+      Lure.Discrimination.Index.Lure.Bin.2,
+      Lure.Discrimination.Index.Lure.Bin.1,
+      TotPAMET
+    )
+  )
+  
+  # Creating Change Scores for LDI
+  B_M_Wide <- B_M_Wide %>%
+    dplyr::mutate(
+      LDI_Light_Rest = Lure.Discrimination.Index_Light - Lure.Discrimination.Index_Control,
+      LDI_Vig_Rest = Lure.Discrimination.Index_Vigorous - Lure.Discrimination.Index_Control,
+      LDI_Vig_Light = Lure.Discrimination.Index_Vigorous - Lure.Discrimination.Index_Light
+    )
+  
+  # Selecting Important Columns and Renaming
+  B_M_Wide <- B_M_Wide %>% dplyr::select(c(Sub_ID:TotPAMET_Control,
+                                    LDI_Light_Rest:LDI_Vig_Light)) %>% 
+    rename(TotPAMET = TotPAMET_Control)
+  
+  B_M_Wide_JS <- B_M_Wide %>% dplyr::select(Sub_ID:Lure.Discrimination.Index_Vigorous,
+                                            TotPAMET:LDI_Vig_Rest)
+```
+
+
+### *Mixed Models (NOT REVIEWED/IN PAPER)
+
+This was exploratory and not reviewed or included in the paper. 
+
+```{r}
+# Cleaning Data
+
+  # Getting LDI/IPAQ data in long format
+  B_M_tmp <- B_M %>%
+    dplyr::select(c(Sub_ID, 
+                    Cond, 
+                    Lure.Discrimination.Index.Lure.Bin.1,
+                    Lure.Discrimination.Index.Lure.Bin.2,
+                    Lure.Discrimination.Index.Lure.Bin.3, 
+                    TotPAMET)) %>%
+    gather("Lure_Similarity", 
+           "Lure_Discrimination_Index",
+           Lure.Discrimination.Index.Lure.Bin.1:Lure.Discrimination.Index.Lure.Bin.3)
+
+  # recoding lure similarity
+  B_M_tmp$Lure_Similarity <-
+    ifelse(
+      B_M_tmp$Lure_Similarity == "Lure.Discrimination.Index.Lure.Bin.1",
+      "High",
+      ifelse(
+        B_M_tmp$Lure_Similarity == "Lure.Discrimination.Index.Lure.Bin.2",
+        "Medium",
+        ifelse(
+          B_M_tmp$Lure_Similarity == "Lure.Discrimination.Index.Lure.Bin.3",
+          "Low",
+          NA
+        )
+      )
+    )
+  
+    # merging with demographic data and selecting relevant rows
+    B_M_Final<- merge(B_M_tmp, Demographic_Table, by = "Sub_ID")
+    B_M_Final<- B_M_Final %>% dplyr::select(Sub_ID:Lure_Discrimination_Index, Age:Race)
+    B_M_Final<- merge(B_M_Final, RM_MST, by = c("Sub_ID", "Cond"))
+    
+    # creating z score TotPAMET Categories
+    mean_TotPAMET <- mean(B_M_Final$TotPAMET)
+    sd_TotPAMET <- sd(B_M_Final$TotPAMET)
+    B_M_Final$TotPAMET_z <- (B_M_Final$TotPAMET - mean_TotPAMET) / sd_TotPAMET
+    B_M_Final$TotPAMET_zcat <- ifelse(B_M_Final$TotPAMET_z < -1, "< -1",
+                                   ifelse(B_M_Final$TotPAMET_z > 1, "> 1",
+                                          "Between -1 and 1"))
+  
+    
+# Creating Mixed Models 
+
+  #Not Controlling for Other Variables------------------------------------------
+    
+  # Model 1: Fixed Predictors = Condition and Lure Similarity
+  model1 <- lmer(Lure_Discrimination_Index ~ Cond * Lure_Similarity + (1 | Sub_ID), data = B_M_Final)
+  summary(model1)
+  
+  # Model 2: Fixed Predictors = Condition, Lure Similarity, and TotPAMET
+  model2 <- lmer(Lure_Discrimination_Index ~ Cond * Lure_Similarity * TotPAMET + (1 | Sub_ID), 
+                 data = B_M_Final)
+  summary(model2)
+  
+  #Controlling for Other Variables------------------------------------------
+
+  # Model 3: Fixed Predictors = Condition and Lure Similarity and covariates
+  model3 <- lmer(Lure_Discrimination_Index ~ Age + Sex + BMI + Race + CESDScore + Education + 
+                   Recognition.Memory + Cond * Lure_Similarity + (1 | Sub_ID), data = B_M_Final)
+  summary(model3)
+  
+  
+  # Model 4: Fixed Predictors = Condition, Lure Similarity, and TotPAMET and covariates
+  model4 <- lmer(Lure_Discrimination_Index ~ Age + Sex + BMI + Race + CESDScore+ Education + 
+                   Recognition.Memory + Cond * Lure_Similarity * TotPAMET + (1 | Sub_ID), 
+                 data = B_M_Final)
+  summary(model4)
+  
+  # Model 5: Fixed Predictors = Condition, Lure Similarity, and TotPAMET (Categorical) and covariates
+  model5 <- lmer(Lure_Discrimination_Index ~ Age + Sex + BMI + Race + CESDScore+ Education + 
+                   Recognition.Memory + Cond * Lure_Similarity * TotPAMET_zcat + (1 | Sub_ID), 
+                 data = B_M_Final)
+  summary(model5)
+  
+  # Simple Slopes Analysis to Clarify Interactions (Cond by Lure similarity)
+  cat_plot(model4, pred = Cond, modx = Lure_Similarity, plot.points = TRUE, interval = TRUE)
+  
+
+  # Simple Slopes Analysis to Clarify Interactions (Cond by Lure similarity by TotPAMET
+  cat_plot(model5, pred = Cond, modx = Lure_Similarity, mod2 = TotPAMET_zcat, plot.points = TRUE, interval = TRUE)
+```
+
+### *Run correlation for light - rest vs. Total METS
+```{r}
+light_cor <- cor.test(B_M_Wide_JS$LDI_Light_Rest, B_M_Wide_JS$TotPAMET, method = c("pearson"))
+light_cor
+#significant
+
+# Extract the correlation coefficient and p-value
+correlation_coef_lig <- round(light_cor$estimate, 2)
+p_value_lig <- round(light_cor$p.value, 3)
+```
+
+### *Plot
+```{r pressure, echo=FALSE}
+(Light_cor_plot <- ggplot(B_M_Wide_JS, aes(x = TotPAMET, y = LDI_Light_Rest)) +
+  geom_point(color = "black", shape = 16, size = 5) +  # Adjust size of points
+  geom_smooth(method = "lm", se = FALSE, color = "red", size = 2) +  # Remove prediction interval and adjust line width
+  labs(
+    title = "Change in MST Performance After Light Exercise vs. Total Baseline Physical Activity",
+    x = "Total Physical Activity (METs)",
+    y = "Change in LDI (Light vs. Rest)"
+  ) +
+   annotate("text", x = Inf, y = -Inf, label = paste("r =", correlation_coef_lig, ", p =", p_value_lig), 
+           hjust = 1.1, vjust = -10, size = 14, color = "black") +  # Add annotation
+  theme(
+    text = element_text(size = 40),  # General text size
+    axis.title = element_text(size = 40),  # Axis titles size
+    axis.text = element_text(size = 40),  # Axis text size
+    plot.title = element_text(size = 40, face = "bold")  # Title size and bold
+  ))
+```
+
+### *Run correlation for vigorous - rest vs. Total METS
+```{r}
+vig_cor <- cor.test(B_M_Wide_JS$LDI_Vig_Rest, B_M_Wide_JS$TotPAMET, method = c("pearson"))
+vig_cor
+#trending
+# Extract the correlation coefficient and p-value
+correlation_coef_vig <- round(vig_cor$estimate, 2)
+p_value_vig <- round(vig_cor$p.value, 3)
+```
+
+
+### *Plot
+
+```{r}
+(Vig_cor_plot <- ggplot(B_M_Wide_JS, aes(x = TotPAMET, y = LDI_Vig_Rest)) +
+  geom_point(color = "black", shape = 16, size = 5) +  # Adjust size of points
+  geom_smooth(method = "lm", se = FALSE, color = "red", size = 2) +  # Adjust width of trend line
+  labs(
+    title = "Change in MST Performance After Vigorous Exercise vs. Total Baseline Physical Activity",
+    x = "Total Physical Activity (METs)",
+    y = "Change in LDI (Vigorous vs. Rest)"
+  ) +
+   annotate("text", x = Inf, y = -Inf, label = paste("r =", correlation_coef_vig, ", p =", p_value_vig), 
+           hjust = 1.1, vjust = -10, size = 14, color = "black") +  # Add annotation
+  theme(
+    text = element_text(size = 40),  # General text size
+    axis.title = element_text(size = 40),  # Axis titles size
+    axis.text = element_text(size = 40),  # Axis text size
+    plot.title = element_text(size = 40, face = "bold")  # Title size and bold
+  ))
+```
+### *Saving Plots
+```{r}
+cor_plots <- (Light_cor_plot / Vig_cor_plot) + 
+  plot_annotation(tag_levels = "A")
+
+
+# Saving/Exporting Plot
+set_project_directory()
+
+ggsave("Output/MSTCorr_Plots.eps",plot= cor_plots, dpi=1200,
+       width=30, height=30, units = "in")
+```
+
+
+# Results - gradCPT
+
+## 1.) ANOVA/Post-Hoc
+-all participants expect #10 kept
+-Participant 16 completed 2 light appointments due to MST software malfunction. 
+-First light appointment included below since gradCPT data was collected with no issues. 
+
+### *dprime
+```{r}
+# Cleaning Data
+
+  # Selecting Relevant Columns
+  gradCPT_AOV<- All_Final %>% 
+    dplyr::select(Cond, 
+           commission_rate, 
+           omission_rate, 
+           criterion, 
+           dprime, 
+           CV_RT, 
+           post_CE_mean, 
+           post_CO_mean, 
+           Sub_ID)
+
+  # Excluding Participants
+  gradCPT_AOV<- subset(gradCPT_AOV, subset= Sub_ID%!in% c(16.4)) #2nd light appt removed
+  gradCPT_AOV$Sub_ID<- as.integer(as.character(gradCPT_AOV$Sub_ID))
+  gradCPT_AOV<- na.omit(gradCPT_AOV) 
+  gradCPT_AOV<- subset(gradCPT_AOV, subset= Sub_ID%!in% c(10))
+
+# One-Way ANOVA for effect of (Condition) on dprime
+options(scipen=100) 
+(dprime_AOV<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                        dv =dprime, within=Cond)))
+
+# Post-Hoc Comparisons (dprime) 
+(dprime_Post_Hoc<- gradCPT_AOV %>%
+  pairwise_t_test(dprime ~ Cond, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+```
+
+### *Criterion
+```{r}
+# One-Way ANOVA for effect of (Condition) on criterion
+options(scipen=100) 
+(criterion_AOV<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                           dv =criterion, within=Cond)))
+
+# Post-Hoc Comparisons (criterion)
+(criterion_Post_Hoc<- gradCPT_AOV %>%
+  pairwise_t_test(criterion ~ Cond, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+```
+
+### *Commission Rate
+```{r}
+# One-Way ANOVA for effect of (Condition) on commission rate
+options(scipen=100) 
+(cr_AOV<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                    dv =commission_rate, within=Cond))) 
+
+# Post-Hoc Comparisons (commission rate)
+(cr_Post_Hoc<- gradCPT_AOV %>%
+  pairwise_t_test(commission_rate ~ Cond, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+
+
+```
+
+### *Omission Rate
+```{r}
+# One-Way ANOVA for effect of (Condition) on omission rate
+options(scipen=100)
+(or_AOV<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                    dv =omission_rate, within=Cond))) 
+
+# Post-Hoc Comparisons (omission rate)
+(or_Post_Hoc<- gradCPT_AOV%>%
+  pairwise_t_test(omission_rate ~ Cond, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+```
+
+### *CV RT
+```{r}
+# One-Way ANOVA for effect of (Condition) on CV RT
+options(scipen=100) 
+(CV_RT_AOV<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                    dv =CV_RT, within=Cond)))
+
+# Post-Hoc Comparisons (CV RT)
+(CV_RT_Post_Hoc<- gradCPT_AOV%>%
+  pairwise_t_test(CV_RT ~ Cond, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+```
+
+## 2.) Assumption Verification
+
+### *dprime
+```{r}
+# Verifying Normality Assumption (grouped by both Condition)
+(normality_gradCPT_dprime<-gradCPT_AOV %>%
+group_by(Cond) %>%
+shapiro_test(dprime) %>% 
+data.frame()) #Not Violated
+
+# Equal Variance Test (Levene's test)
+(equalvar_gradCPT_dprime<- leveneTest(dprime ~ Cond,data=gradCPT_AOV)) #Not Violated
+```
+
+### *Criterion
+```{r}
+# Verifying Normality Assumption (grouped by both Condition)
+(normality_gradCPT_criterion<-gradCPT_AOV %>%
+group_by(Cond) %>%
+shapiro_test(criterion) %>% 
+data.frame()) #Not Violated
+
+# Equal Variance Test (Levene's test)
+(equalvar_gradCPT_criterion<- leveneTest(criterion ~ Cond,data=gradCPT_AOV)) #Not Violated
+```
+
+### *Commission Rate
+```{r}
+# Verifying Normality Assumption (grouped by both Condition)
+(normality_gradCPT_commission_rate<-gradCPT_AOV %>%
+group_by(Cond) %>%
+shapiro_test(commission_rate) %>% 
+data.frame()) #Not Violated
+
+# Equal Variance Test (Levene's test)
+(equalvar_gradCPT_commission_rate<- leveneTest(commission_rate ~ Cond,data=gradCPT_AOV)) #Not Violated
+```
+
+
+### *Omission Rate
+```{r}
+# Verifying Normality Assumption (grouped by both Condition)
+(normality_gradCPT_omission_rate<-gradCPT_AOV %>%
+group_by(Cond) %>%
+shapiro_test(omission_rate) %>% 
+data.frame()) #Severely Violated
+
+# Equal Variance Test (Levene's test)
+(equalvar_gradCPT_omission_rate<- leveneTest(omission_rate ~ Cond,data=gradCPT_AOV))#Not Violated
+```
+
+
+### *CV RT
+```{r}
+# Verifying Normality Assumption (grouped by both Condition)
+(normality_gradCPT_CV_RT<-gradCPT_AOV %>%
+group_by(Cond) %>%
+shapiro_test(CV_RT) %>% 
+data.frame())#Not Violated
+
+# Equal Variance Test (Levene's test)
+(equalvar_gradCPT_CV_RT<- leveneTest(CV_RT ~ Cond,data=gradCPT_AOV))#Not Violated
+```
+
+## 4.) Transformation/Outlier Removal
+-Transformed omission rate (due to non-normality)
+-Checked for outliers 
+
+```{r}
+# Checking Skewness of Omission Rate/Commission Rate
+skewness(gradCPT_AOV$omission_rate) #Super skewed >5
+skewness(gradCPT_AOV$commission_rate) #Adheres to criteria (<1)
+
+# Trying transformations for omission rate
+skewness(log(gradCPT_AOV$omission_rate)) #Doesn't work (0)
+skewness(sqrt(gradCPT_AOV$omission_rate)) #1.65
+skewness(atan(gradCPT_AOV$omission_rate)) #5.59
+skewness((gradCPT_AOV$omission_rate)^(1/3))#0.66775
+
+# Applying cube root transformation to omission rate
+gradCPT_AOV$omission_rate<- (gradCPT_AOV$omission_rate)^(1/3)
+
+# Computing Z-Scores for Every Grouping Variable within the Data Set
+gradCPT_AOV<-gradCPT_AOV %>%
+  group_by(Cond) %>%
+  mutate(z_score_criterion=scale(criterion)) %>% 
+  mutate(z_score_dprime=scale(dprime)) %>%
+  mutate(z_score_commission_rate=scale(commission_rate)) %>% 
+  mutate(z_score_ommission_rate=scale(omission_rate)) %>% 
+  mutate(z_score_CV_RT=scale(CV_RT))
+
+# Converting all Z-Scores to Absolute Value for Indexing
+gradCPT_AOV$z_score_criterion<- abs(gradCPT_AOV$z_score_criterion)
+gradCPT_AOV$z_score_dprime<- abs(gradCPT_AOV$z_score_dprime)
+gradCPT_AOV$z_score_commission_rate<- abs(gradCPT_AOV$z_score_commission_rate)
+gradCPT_AOV$z_score_ommission_rate<- abs(gradCPT_AOV$z_score_ommission_rate)
+gradCPT_AOV$z_score_CV_RT<- abs(gradCPT_AOV$z_score_CV_RT)
+
+# Indexing Outlier Row # for Each Dependent Variable
+sub_num_outlier_criterion<- gradCPT_AOV[which(gradCPT_AOV[,10]>3),9]
+sub_num_outlier_dprime<- gradCPT_AOV[which(gradCPT_AOV[,11]>3),9]
+sub_num_outlier_comission_rate<- gradCPT_AOV[which(gradCPT_AOV[,12]>3),9]
+sub_num_outlier_ommission_rate<- gradCPT_AOV[which(gradCPT_AOV[,13]>3),9]
+sub_num_outlier_CV_RT<- gradCPT_AOV[which(gradCPT_AOV[,14]>3),9]
+
+print(c(sub_num_outlier_criterion, sub_num_outlier_dprime, 
+        sub_num_outlier_comission_rate, sub_num_outlier_ommission_rate,
+        sub_num_outlier_CV_RT))
+
+# Creating New Data Sets With Outliers Removed
+outlier_removed_criterion<- gradCPT_AOV[gradCPT_AOV$Sub_ID %!in% sub_num_outlier_criterion$Sub_ID,]
+outlier_removed_dprime<- gradCPT_AOV[gradCPT_AOV$Sub_ID %!in% sub_num_outlier_dprime$Sub_ID,]
+outlier_removed_comission_rate<- gradCPT_AOV[gradCPT_AOV$Sub_ID %!in% sub_num_outlier_comission_rate$Sub_ID,]
+outlier_removed_omission_rate<- gradCPT_AOV[gradCPT_AOV$Sub_ID %!in% sub_num_outlier_ommission_rate$Sub_ID,]
+outlier_removed_CV_RT<- gradCPT_AOV[gradCPT_AOV$Sub_ID %!in% sub_num_outlier_CV_RT$Sub_ID,]
+```
+
+## 5.) ANOVA/Post-Hoc
+
+### *dprime
+-No need to re-run as no outliers detected/no violations of ANOVA assumptions.
+
+### *Criterion
+-No need to re-run as no outliers detected/no violations of ANOVA assumptions. 
+
+### *Commission Rate
+-No need to re-run as no outliers detected/no violations of ANOVA assumptions.
+
+### *Omission Rate
+-Re-ran after normality improved
+```{r}
+# One-Way ANOVA for effect of (Condition) on omission rate
+outlier_removed_omission_rate<- outlier_removed_omission_rate %>% ungroup()
+options(scipen=100) 
+(or_AOV<- get_anova_table(anova_test(data = outlier_removed_omission_rate,
+                                    wid=Sub_ID, 
+                                    dv =omission_rate, 
+                                    within=Cond)))
+
+# Post-Hoc Comparisons (omission rate)
+(or_Post_Hoc<- outlier_removed_omission_rate%>%
+  pairwise_t_test(omission_rate ~ Cond, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+```
+
+### *CV RT
+-No need to re-run as no outliers detected/no violations of ANOVA assumptions.
+
+## 6.) Plotting
+
+-ggboxplot utilizes 1.5*IQR as outlier criteria
+-This means some outliers on the plots do not match our outlier criteria (M +- 3sd)
+-Noted in figure captions
+
+### *dprime
+```{r}
+# Running Paired T-Tests for dprime by condition
+stat.test_gradCPT_dprime<- compare_means(dprime ~ Cond, 
+                                        data= gradCPT_AOV, paired = TRUE,
+                                        method="t.test",
+                                        label="p.signif",
+                                        p.adjust.method ="none")
+
+stat.test_gradCPT_dprime[2, 7] <- "p = .053"
+
+# Double-check the corresponding p-values in the 'stat.test_gradCPT_dprime'
+print(stat.test_gradCPT_dprime)
+
+# Boxplot with p-value displayed
+(gradCPT_dprime <- ggboxplot(lwd = 2.0, gradCPT_AOV, x="Cond", y="dprime", color="Cond", outlier.size = 5) +
+  labs(y = "d'", x = "Condition") +
+  scale_x_discrete(breaks = gradCPT_AOV$Cond, labels = gradCPT_AOV$Cond) +
+  scale_y_continuous(limits = c(1.5, 5.5), breaks = c(1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0)) +
+  stat_pvalue_manual(stat.test_gradCPT_dprime, label = "p.signif", 
+                     tip.length = 0.03, bracket.size = 1.4, 
+                     label.size = 16.0, hide.ns = FALSE, # Show non-significant p-values
+                     y.position = 5.0, step.increase = 0.10) +
+  theme(text = element_text(size = 40)) +
+  grids(linetype = "dashed", size = 1.0, color = "grey") +
+  theme(legend.position = "none"))
+
+
+```
+
+### *criterion
+```{r}
+# Running Paired T-Tests for criterion by condition
+stat.test_gradCPT_criterion<- compare_means(criterion ~ Cond, 
+                                        data= gradCPT_AOV, paired = TRUE, 
+                                        method="t.test",
+                                        label="p.signif",
+                                        p.adjust.method ="none")
+
+# criterion Box Plot colored by condition
+(gradCPT_criterion<- ggboxplot(lwd = 2.0, gradCPT_AOV, x="Cond", y="criterion",
+                              color="Cond", outlier.size = 5)+
+  labs(y="Criterion", x="Condition")+
+  scale_x_discrete(breaks=gradCPT_AOV$Cond, labels=gradCPT_AOV$Cond)+
+  scale_y_continuous(limits=c(0.4,1.8),
+                     breaks=c(0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0))+
+  #stat_pvalue_manual(stat.test_gradCPT_criterion, label="p.signif", tip.length=0.01,bracket.size = 1.2, label.size = 12.0,
+                    #hide.ns=TRUE,y.position=1.6, step.increase=0.10)+
+  theme(legend.position="none")+
+  theme(text = element_text(size = 40))+
+  grids(linetype = "dashed", size = 1.0, color = "grey"))
+  #Uncorrected @ ANOVA not significant
+```
+
+
+### *Commission Rate
+```{r}
+# Running Paired T-Tests for commission rate by condition
+stat.test_gradCPT_commission_rate<- compare_means(commission_rate ~ Cond, 
+                                        data= gradCPT_AOV, paired = TRUE, 
+                                        method="t.test",
+                                        label="p.signif",
+                                        p.adjust.method ="none")
+
+
+
+
+# commission rate Box Plot colored by condition
+(gradCPT_commission_rate<- ggboxplot(lwd = 2.0, gradCPT_AOV, x="Cond", y="commission_rate", color="Cond", outlier.size = 5)+
+  labs(y="Commission Error Rate", x="Condition")+
+  scale_x_discrete(breaks=gradCPT_AOV$Cond, labels=gradCPT_AOV$Cond)+
+  scale_y_continuous(limits=c(0,0.65),
+                     breaks=c(seq(from=0, to=0.6, by=0.1)))+
+  stat_pvalue_manual(stat.test_gradCPT_commission_rate, label="p.signif", tip.length=0.03, bracket.size = 1.4, label.size = 16.0,
+                    hide.ns=TRUE,y.position=0.55, step.increase=0.10)+
+   theme(legend.position="none")+
+   theme(text = element_text(size = 40))+
+    grids(linetype = "dashed", size = 1.0, color = "grey"))
+#Uncorrected @ ANOVA not significant
+```
+
+
+### *Omission Rate
+```{r}
+# Running Paired T-Tests for omission rate by condition
+stat.test_gradCPT_omission_rate<- compare_means(omission_rate ~ Cond, 
+                                        data= gradCPT_AOV, paired = TRUE, 
+                                        method="t.test",
+                                        label="p.signif",
+                                        p.adjust.method ="none")
+
+# omission rate Box Plot colored by condition
+(gradCPT_omission_rate<- ggboxplot(lwd= 2.0, gradCPT_AOV, x="Cond", y="omission_rate", color="Cond", outlier.size = 5)+
+  labs(y="Omission Error Rate", x="Condition")+
+  scale_x_discrete(breaks=gradCPT_AOV$Cond, labels=gradCPT_AOV$Cond)+
+  scale_y_continuous(limits=c(0,0.40),
+                     breaks=c(seq(from=0, to=0.40, by=0.05)))+
+  stat_pvalue_manual(stat.test_gradCPT_omission_rate, label="p.signif", tip.length=0.01, bracket.size = 1.2, label.size = 12.0,
+                    hide.ns=TRUE,y.position=0.02, step.increase=0.10)+
+   theme(legend.position="none")+
+  theme(text = element_text(size = 40))+
+    grids(linetype = "dashed", size = 1.0, color = "grey"))#Uncorrected @ ANOVA not significant
+```
+
+
+### *CV RT
+```{r}
+# Running Paired T-Tests for CV RT by condition
+stat.test_gradCPT_CV_RT<- compare_means(CV_RT ~ Cond, 
+                                        data= gradCPT_AOV, paired = TRUE, 
+                                        method="t.test",
+                                        label="p.signif",
+                                        p.adjust.method ="none")
+
+# CV RT Box Plot colored by condition
+(gradCPT_CV_RT<- ggboxplot(lwd = 2.0,gradCPT_AOV, x="Cond", y="CV_RT", color="Cond", outlier.size = 5)+
+  labs(y="Response Time Variability (CV)", x="Condition")+
+  scale_x_discrete(breaks=gradCPT_AOV$Cond, labels=gradCPT_AOV$Cond)+
+  scale_y_continuous(limits=c(0.07,0.18),
+                     breaks=c(seq(from=0.07, to=0.18, by=0.02)))+
+  #stat_pvalue_manual(stat.test_gradCPT_CV_RT, label="p.signif", tip.length=0.01, bracket.size = 1.2, label.size = 12.0,
+                    #hide.ns=TRUE,y.position=0.17, step.increase=0.10)+
+   theme(legend.position = "none")+
+  theme(text = element_text(size = 40))+
+    grids(linetype = "dashed", size = 1.0, color = "grey"))#Uncorrected @ ANOVA not significant
+```
+
+
+### *Saving
+```{r}
+# Creating Plot Layout
+(gradCPT_Plots<- (gradCPT_dprime + 
+                    gradCPT_commission_rate +
+                    gradCPT_omission_rate + 
+                    gradCPT_criterion + 
+                    gradCPT_CV_RT)+
+  plot_annotation(tag_levels="A"))
+
+(gradCPT_Plots_Three <- (
+    gradCPT_dprime +
+      gradCPT_commission_rate +
+      gradCPT_omission_rate
+  ) +
+    plot_annotation(tag_levels = "A"))
+                          
+
+
+# Saving/Exporting Plot
+set_project_directory()
+
+ggsave("output/gradCPT_Plots.eps",plot= gradCPT_Plots, dpi=1200,
+       width=30, height=24, units = "in")
+
+ggsave("output/gradCPT_Plots_Three.eps",plot= gradCPT_Plots_Three, dpi=1200,
+       width=30, height=14, units = "in")
+```
+
+# Results - Facename Task
+-Note, there was an issue with the stimulus presentation for FN task
+-This hasn't been reviewed/isn't published
+
+## 1.) ANOVA/Post-Hoc
+```{r}
+# Cleaning Data
+FaceName_AOV<- All_Final %>% dplyr::select(Cond, Accuracy_Response_Trials, Sub_ID)
+FaceName_AOV$Sub_ID<- as.integer(as.character(FaceName_AOV$Sub_ID))
+FaceName_AOV<- na.omit(FaceName_AOV)
+FaceName_AOV<- subset(FaceName_AOV, subset= FaceName_AOV$Sub_ID %!in% c(4,10))
+
+
+
+
+# One-Way ANOVA for effect of (Condition) on Accuracy for Response Trials
+options(scipen=100) 
+(FaceName_AOV_Results<- get_anova_table(anova_test(data = FaceName_AOV, 
+                                                  wid=Sub_ID, 
+                                                  dv =Accuracy_Response_Trials, 
+                                                  within=Cond)))
+
+# Post-Hoc Comparisons (Accuracy for Response Trials)
+(FaceName_Post_Hoc<- FaceName_AOV%>%
+  pairwise_t_test(Accuracy_Response_Trials ~ Cond, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+```
+
+## 2.) Assumption Verification
+
+-recall, participants performed near ceiling on this task
+```{r}
+# Verifying Normality Assumption (grouped by both Condition)
+(normality_FN<-FaceName_AOV %>%
+group_by(Cond) %>%
+shapiro_test(Accuracy_Response_Trials) %>% 
+ungroup() %>% 
+data.frame()) #Violated for Light Condition
+
+# Equal Variance Test (Levene's test)
+(equalvar_FN<- leveneTest(Accuracy_Response_Trials ~ Cond,data=FaceName_AOV)) #Not Violated but very close 
+```
+
+## 3.) Transformation/Outlier Removal
+```{r}
+# Outlier Removal 
+outlier_removed_FN<- FaceName_AOV %>% 
+  group_by(Cond) %>% 
+  mutate(z_score=scale(Accuracy_Response_Trials)) %>% 
+  ungroup()
+(outlier_subid_FN<- outlier_removed_FN[which((outlier_removed_FN$z_score>3 |                                              outlier_removed_FN$z_score<(-3))==TRUE),3])#none
+
+# Data Transformation
+skewness(FaceName_AOV$Accuracy_Response_Trials)# -1.55
+skewness(log(FaceName_AOV$Accuracy_Response_Trials)) #-2.08
+skewness(sqrt(FaceName_AOV$Accuracy_Response_Trials)) #-1.81
+skewness(atan(FaceName_AOV$Accuracy_Response_Trials)) #-1.95
+skewness((FaceName_AOV$Accuracy_Response_Trials)^(1/3)) #-1.89 (None Reduce Skew)
+skewness(1/(max(FaceName_AOV$Accuracy_Response_Trials+1)-FaceName_AOV$Accuracy_Response_Trials)) #-0.98 (Reduces Skew)
+
+# Implementing Best Data Transformation Technique (1/(max(x+1) - x))
+x<- 1/(max(FaceName_AOV$Accuracy_Response_Trials+1)-FaceName_AOV$Accuracy_Response_Trials)
+FaceName_AOV$transformed_accuracy_response_trials<- x
+```
+
+## 4.) ANOVA/Post-Hoc
+```{r}
+# One-Way ANOVA for effect of (Condition) on Accuracy for Response Trials
+options(scipen=100) 
+(FaceName_AOV_Results<- get_anova_table(anova_test(data = FaceName_AOV, 
+                                                  wid=Sub_ID, 
+                                                  dv=transformed_accuracy_response_trials,
+                                                  within=Cond)))
+
+# Post-Hoc Comparisons (Accuracy for Response Trials)
+(FaceName_Post_Hoc<- FaceName_AOV%>%
+  pairwise_t_test(transformed_accuracy_response_trials ~ Cond, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+```
+## 5.) Plotting
+
+### *Accuracy Response Trials
+-Significance and data non-transformed here (doesn't matter as P-Values
+non-significant for both)
+```{r}
+#Organizing P-Values 
+stat.test_FN<- compare_means(Accuracy_Response_Trials ~ Cond, 
+                                        data= FaceName_AOV, paired = TRUE, 
+                                        method="t.test",
+                                        label="p.signif",
+                                        p.adjust.method ="none")
+
+#Box Plot
+(FN<- ggboxplot(FaceName_AOV, x="Cond", y="Accuracy_Response_Trials")+
+  labs(y="Accuracy for Response Trials", x="Condition")+
+  scale_x_discrete(breaks=FaceName_AOV$Cond, labels=FaceName_AOV$Cond)+
+  scale_y_continuous(limits=c(0.5,1.0),
+                     breaks=c(seq(from=0.5, to=1.0, by=0.05)))+
+  stat_pvalue_manual(stat.test_FN, label="p.signif", tip.length=0.01,
+                    hide.ns=TRUE,y.position=1.0, step.increase=0.05))
+```
+
+### *Saving
+```{r}
+#Saving/Exporting Plot
+set_project_directory()
+
+ggsave("Output/FN_Plots.eps",plot= FN, dpi=1200,
+       width=15, height=10)
+```
+
+# Results - Flanker Task
+
+## 1.) ANOVA/Post-Hoc
+
+```{r}
+# Data Cleaning
+Flanker_AOV<- All_Final %>% dplyr::select(Cond, Age.Corrected.Standard.Score, Sub_ID)
+Flanker_AOV<- subset(Flanker_AOV, subset=Flanker_AOV$Sub_ID %!in% c(10.1,10.2,10.3,16.4,2227.3))
+Flanker_AOV$Sub_ID<- as.integer(as.character(Flanker_AOV$Sub_ID))
+Flanker_AOV<- na.omit(Flanker_AOV)
+
+#One-Way ANOVA for the effect of Condition on Age Corrected Standard Score
+options(scipen=100) 
+(Age_Corr_AOV_Results<- get_anova_table(anova_test(data = Flanker_AOV, wid=Sub_ID, dv =Age.Corrected.Standard.Score, within=Cond)))
+
+#Post-Hoc Comparisons (Age Corrected Standard Score)
+(Flanker_Post_Hoc<- Flanker_AOV%>%
+  pairwise_t_test(Age.Corrected.Standard.Score ~ Cond, paired= TRUE,
+                          p.adjust.method= "bonferroni"))
+```
+
+## 2.) Assumption Verification
+```{r}
+#Verifying Normality Assumption (grouped by Condition)
+(normality_Flanker<-Flanker_AOV %>%
+group_by(Cond) %>%
+shapiro_test(Age.Corrected.Standard.Score) %>% 
+ungroup() %>% 
+data.frame())#Violated for Vigorous
+
+#Equal Variance Test (Levene's test)
+(equalvar_Flanker<- leveneTest(Age.Corrected.Standard.Score ~ Cond,data=Flanker_AOV)) #Not Violated 
+```
+## 3.) Transformation/Outlier Removal
+-1 sd is 15 so 3d=45
+-100 plus and minus 45 is 3 sd
+```{r}
+skewness(Flanker_AOV$Age.Corrected.Standard.Score) #Not super skewed***
+which(Flanker_AOV$Age.Corrected.Standard.Score > 145) #No Outliers
+which(Flanker_AOV$Age.Corrected.Standard.Score < 55) #No Outliers
+```
+## 4.) ANOVA/Post-Hoc
+-No need to re-run as not severely skewed/no violation Levene's test.
+
+## 5.) Plotting
+
+### *Age Corrected Standard Scores
+```{r}
+#Organizing P-Values 
+stat.test_Flanker<- compare_means(Age.Corrected.Standard.Score ~ Cond, 
+                                        data= Flanker_AOV, paired = TRUE, 
+                                        method="t.test",
+                                        label="p.signif",
+                                        p.adjust.method ="none")
+
+
+
+#Making Plot
+(Flanker<- ggboxplot(lwd = 2.0, Flanker_AOV, x="Cond", y="Age.Corrected.Standard.Score", color = "Cond", outlier.size = 0.4)+
+  labs(y="Age-Corrected Standard Score", x="Condition")+
+  scale_x_discrete(breaks=Flanker_AOV$Cond, labels=Flanker_AOV$Cond)+
+  scale_y_continuous(limits=c(60,134),
+                     breaks=c(seq(from=60, to=135, by=5)))+
+  stat_pvalue_manual(stat.test_Flanker, label="p.signif", tip.length=0.01,
+                    hide.ns=TRUE,y.position=1.0, step.increase=0.05)+
+    theme(text = element_text(size = 40))+
+  grids(linetype = "dashed", size = 1.0, color = "grey")+
+  theme(legend.position="none"))
+```
+
+### *Saving Plot
+```{r}
+set_project_directory()
+ggsave("Output/flanker_Plots.eps",plot= Flanker, dpi=1200,
+       width=30, height=24, units = "in")
+```
+
+# Results - Cortisol
+
+### 1.) Exploration
+
+-Participants provided three samples (pre-exercise, post-exercise, end of appt)
+
+-2 data forms cleaned and explored:
+  *Absolute (T1, T2, T3)
+  *Relative (T2-T1, T3-T1, T3-T2)
+
+```{r}
+# Absolute 
+
+  # Getting Data and Filtering
+  Cortisol <- All_Final %>%
+    dplyr::select(Sub_ID, 
+           Cond, 
+           cortisol_t1, 
+           cortisol_t2, 
+           cortisol_t3, 
+           commission_rate, 
+           omission_rate, 
+           criterion, 
+           dprime, 
+           CV_RT, 
+           post_CE_mean, 
+           post_CO_mean) %>%
+    filter(!Sub_ID %in% c(1.1, 1.2, 1.3, 2227.3, 16.2))
+  
+  #Create new long data-set
+  Cortisol_Long <- pivot_longer(
+    data = Cortisol,
+    cols = c("cortisol_t1", "cortisol_t2", "cortisol_t3"),
+    names_to = "timepoint",
+    values_to = "cortisol"
+  )
+  
+  #Convert Cortisol to nmol/L
+  Cortisol_Long$cortisol_nmol_L <- Cortisol_Long$cortisol * 27.59
+  Cortisol_Long$Sub_ID_Int <- floor(as.numeric(Cortisol_Long$Sub_ID))
+
+# Relative 
+  
+  # Getting Data and Filtering
+  cortisol_change<- All_Final %>% 
+    dplyr::select(Sub_ID, 
+           cortisol_t1, 
+           cortisol_t2, 
+           cortisol_t3, 
+           Cond, 
+           Accuracy_All_Trials:Accuracy_Response_Trials, 
+           Uncorrected.Standard.Score, 
+           pre_cc_mean:criterion, 
+           Lure.Discrimination.Index, 
+           Lure.Discrimination.Index.Lure.Bin.1, 
+           Lure.Discrimination.Index.Lure.Bin.2, 
+           Lure.Discrimination.Index.Lure.Bin.3)
+  cortisol_change<- subset(cortisol_change, 
+                           subset= Sub_ID%!in% c(1.1, 1.2, 1.3, 2227.3, 16.4)) 
+
+#Create a new wide data-set + Convert Cortisol to nmol/L
+cortisol_change_wide <- cortisol_change %>% 
+  mutate(cortisol_t2_t1 = (cortisol_t2 - cortisol_t1) *27.59,
+           cortisol_t3_t2 = (cortisol_t3 - cortisol_t2) * 27.59)
+
+cortisol_change_final_wide<- cortisol_change_wide
+
+#Creating long and wide data-set
+cortisol_change_final <- pivot_longer(cortisol_change_wide, cols = c("cortisol_t2_t1", "cortisol_t3_t2"), names_to = "timepoint", values_to = "cortisol")
+```
+
+### 2.) Plotting
+
+#### *individual lines
+```{r}
+# All - Separate Lines
+ggplot(Cortisol_Long, aes(x = timepoint, y = cortisol_nmol_L, group = Sub_ID, color = Cond)) +
+  geom_line() +
+  labs(x = "Timepoints", y = "Cortisol (nmol/L)", color = "Condition") +
+  scale_x_discrete(labels = c("Pre-exercise/rest", "Post-exercise/rest", "Post study")) +
+  scale_y_continuous(limits = c(0, 29), breaks = sequence(30, from = 0, by = 2))
+```
+
+#### *suplemental appendix draft (with error bars)
+```{r}
+cortisol_sd <- Cortisol_Long %>%
+  group_by(Cond, timepoint) %>%
+  summarize(cortisol_sd = sd(cortisol_nmol_L),
+            cortisol_mean = mean(cortisol_nmol_L),
+            n = 18)  # Adding the sample size (n) for calculating the confidence interval
+
+cortisol_sd <- cortisol_sd %>%
+  mutate(conf_interval = 1.96 * cortisol_sd / sqrt(n),
+         lower_bound = cortisol_mean - conf_interval,
+         upper_bound = cortisol_mean + conf_interval)
+
+ggplot(cortisol_sd, aes(x = timepoint, y = cortisol_mean, 
+                        group = Cond, color = Cond)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower_bound, ymax = upper_bound), width = 0.2) +
+  labs(x = "Timepoint", y = "Mean Cortisol (nmol/L)", title = "Cortisol Levels Over Time")
+```
+
+#### *suplemental appendix (actual)
+
+```{r}
+# Computing mean and sd
+cortisol_sd <- Cortisol_Long %>%
+  group_by(Cond, timepoint) %>%
+  summarize(cortisol_sd = sd(cortisol_nmol_L),
+            cortisol_mean = mean(cortisol_nmol_L))
+
+# Plotting (without error bars)
+(cortisol_sd_plot <- ggplot(cortisol_sd, aes(x = timepoint, y = cortisol_mean, group = Cond, color = Cond)) +
+  geom_line(lwd = 2.0) +
+  geom_point(size = 4) +
+  labs(x = "Timepoint", y = "Mean Cortisol (nmol/L)") +
+  scale_x_discrete(labels = c("Pre-Condition", "Post-Condition", "End of Appointment")) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 40),
+    axis.text = element_text(color = "black"),  # Set axis labels color to black
+    axis.line = element_line(color = "black", size = 1),  # Add axis borders
+    panel.grid.major = element_line(color = "grey", linetype = "dashed", size = 1.0)  # Add dashed grid lines
+  ) +
+  guides(color = guide_legend(title = "Condition")))
+```
+
+### 3.) ANOVA/Post-Hoc
+```{r}
+# Two-way ANOVA for effect of (condition/timepoint) on Cortisol
+options(scipen = 100)
+Cortisol_Long$Sub_ID <- as.integer(Cortisol_Long$Sub_ID)
+(cortisol_AOV_New<- get_anova_table(
+  anova_test(
+    data = Cortisol_Long,
+    wid = Sub_ID,
+    dv = cortisol,
+    within = c(timepoint, Cond)
+  )
+))
+
+# Post-Hoc Comparisons (Timepoint)
+(cortisol_timepoint_Post_Hoc <- Cortisol_Long %>%
+  group_by(Cond) %>%
+  pairwise_t_test(
+    cortisol ~ timepoint,
+    paired = TRUE,
+    p.adjust.method = "none"
+  ))
+```
+### 4.) Assumption Verification
+
+```{r}
+# Verifying Normality Assumption
+(normality_Cortisol<- Cortisol_Long %>% 
+  group_by(Cond, timepoint) %>% 
+  shapiro_test(cortisol) %>% 
+  data.frame())
+
+# Equal Variance Test (Levene's Test)
+(equalvar_Cortisol<- leveneTest(cortisol ~ interaction(Cond, timepoint), data = Cortisol_Long))
+
+# Outlier Removal
+outlier_removed_cortisol <- Cortisol_Long %>% 
+  group_by(Cond, timepoint) %>% 
+  mutate(z_score = scale(cortisol)) %>% 
+  ungroup() #12 is outlier
+
+outlier_removed_cortisol<- subset(outlier_removed_cortisol, subset = 
+                                    outlier_removed_cortisol$Sub_ID %!in% c(12))
+```
+
+### 5.) ANOVA/Post-Hoc
+```{r}
+# Two-way ANOVA for effect of (timepoint/condition) on Cortisol
+options(scipen = 100)
+(cortisol_AOV_New<- get_anova_table(
+  anova_test(
+    data = outlier_removed_cortisol,
+    wid = Sub_ID,
+    dv = cortisol,
+    within = c(timepoint, Cond)
+  )
+))
+
+
+# Post-hoc pairwise t-tests (cortisol)
+(cortisol_timepoint_Post_Hoc <- outlier_removed_cortisol %>%
+  group_by(Cond) %>%
+  pairwise_t_test(
+    cortisol ~ timepoint,
+    paired = TRUE,
+    p.adjust.method = "none"
+  ))
+```
+
+
