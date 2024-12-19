@@ -1,7 +1,7 @@
 ---
 title: "MAE_Data_Analysis"
 author: "Michael Melville"
-date: "2024-09-23"
+date: "2024-12-13"
 output: html_document
 ---
 
@@ -64,29 +64,19 @@ set_project_directory()
 
 # Import the data
 All_Final <- read.csv("Data/All_Processed.csv")
-Flanker_Trial <- read.csv("Data/Flanker_Trial.csv")
 
 # Checking the first few rows of the imported data
 head(All_Final)
-head(Flanker_Trial)
 ```
 # Data Cleaning
 
 ```{r}
-# Reformatting "DateFinished" column
-All_Final$DateFinished <- as.Date(All_Final$DateFinished - 2, origin = "1899-12-30")
-
 # Removing Extra Column
 All_Final <- All_Final %>% dplyr::select(Sub_ID:last_col())
 
 # Removing Participant #10 (Failed to complete Vigorous Condition) and extra row
-All_Final <- All_Final %>% filter(Sub_ID %!in% c(10.1, 10.2, 10.3, 2227.3))
+All_Final <- All_Final %>% filter(Sub_ID %!in% c(10.1, 10.2, 10.3))
 ```
-
-
-
-
-
 
 # Table 1 - Demographic Data
 
@@ -301,16 +291,32 @@ HR_Validation_Summary
     gather("Lure_Similarity", "Lure_Discrimination_Index", 2:4)
   LDI_MST<- LDI_MST %>% na.omit()
   LDI_MST$Sub_ID<- as.integer(as.character(LDI_MST$Sub_ID))
-  LDI_MST<- subset(LDI_MST, subset= Sub_ID%!in% c(3)) #3 had missing MST data for 1 appt
+  LDI_MST<- subset(LDI_MST, subset= Sub_ID%!in% c(3, 10)) #3 had missing MST data for 1 appt
   
+  # Lure Discrimination Index (LDI) - Participant 16 removed for Appt analysis
+  LDI_MST_Appt <- All_Final %>% dplyr::select(Cond, 
+                                              Lure.Discrimination.Index,Sub_ID,
+                                              Appointment_Number)
+  colnames(LDI_MST_Appt)<- c("Condition", "Lure_Discrimination_Index", "Sub_ID", "Appt")
+  LDI_MST_Appt<- LDI_MST_Appt %>% na.omit()
+  LDI_MST_Appt$Sub_ID<- as.integer(as.character(LDI_MST_Appt$Sub_ID))
+  LDI_MST_Appt<- subset(LDI_MST_Appt, subset= Sub_ID%!in% c(3,10)) #3 had missing MST data for 1 appt
+  LDI_MST_Appt <- LDI_MST_Appt %>% mutate(Appt = case_when(
+     Sub_ID == 16 & Appt == 3 ~ 2,  # Change appointment 3 to 2 for Sub_ID = 16
+      Sub_ID == 16 & Appt == 4 ~ 3,  # Change appointment 4 to 3 for Sub_ID = 16
+      TRUE ~ Appt                # Leave all other rows unchanged
+  )
+  )
+  LDI_MST_Appt$Appt <- as.factor(LDI_MST_Appt$Appt)
+  LDI_MST_Appt$Condition <- as.factor(LDI_MST_Appt$Condition)
+
   # Recognition Memory (RM)
   RM_MST<- All_Final %>% 
     dplyr::select(Cond, Sub_ID, Recognition.Memory)
   RM_MST$Sub_ID <- as.integer(as.character(RM_MST$Sub_ID))
-  RM_MST<- subset(RM_MST, subset = Sub_ID%!in% c(3))
+  RM_MST<- subset(RM_MST, subset = Sub_ID%!in% c(3, 10))
   RM_MST_NA<- which(is.na(RM_MST$Recognition.Memory))
   RM_MST <- RM_MST[-RM_MST_NA,]
-
 
 # Two-Way ANOVA for effect of (Condition and Lure Similarity) on LDI
 options(scipen=100) 
@@ -325,6 +331,13 @@ options(scipen=1000000000) #Removes scientific notation
           group_by(Condition) %>% 
           pairwise_t_test(Lure_Discrimination_Index ~ Lure_Similarity, paired= TRUE,
                           p.adjust.method= "bonferroni"))
+
+# One-Way ANOVA for effect of (Appointment Number) on LDI
+options(scipen=100) 
+(MST_AOV_Appt<- get_anova_table(anova_test(data = LDI_MST_Appt, 
+                                     wid=Sub_ID, 
+                                     dv = Lure_Discrimination_Index, 
+                                     within= c(Appt))))
 
 # One-Way ANOVA for effect of (Condition) on RM 
 options(scipen=100) 
@@ -366,6 +379,24 @@ RM:
   outlier_subid_MST<- as.integer(outlier_subid_MST$Sub_ID)
   outlier_removed_MST<- subset(outlier_removed_MST, subset= outlier_removed_MST$Sub_ID %!in% c(outlier_subid_MST))
   
+    # Verifying Normality Assumption (grouped by Appt)
+  (normality_MST_Appt<-LDI_MST_Appt %>%
+  group_by(Appt) %>%
+  shapiro_test(Lure_Discrimination_Index) %>% 
+  data.frame()) #Only violated for Control and Vigorous Low Condition 
+  
+  # Equal Variance Test (Levene's test)
+  (equalvar_MST_Appt<- leveneTest(Lure_Discrimination_Index ~ interaction(Appt),data=LDI_MST_Appt)) #Not Violated
+  
+  # Outlier Removal (3 sd)
+  (outlier_removed_MST_Appt<- LDI_MST_Appt %>% 
+    group_by(Appt) %>% 
+    mutate(z_score=scale(Lure_Discrimination_Index)) %>%#Note- No Outliers
+    ungroup())
+  outlier_subid_MST<-outlier_removed_MST_Appt[which((outlier_removed_MST_Appt$z_score>3 | outlier_removed_MST_Appt$z_score< (-3))==TRUE),2]
+  outlier_subid_MST<- as.integer(outlier_subid_MST$Sub_ID)
+  outlier_removed_MST_Appt<- subset(outlier_removed_MST_Appt, subset= outlier_removed_MST_Appt$Sub_ID %!in% c(outlier_subid_MST))
+  
 # RM
   
   # Verifying Normality Assumption (grouped by Condition)
@@ -392,7 +423,6 @@ options(scipen=100)
                                      dv =Lure_Discrimination_Index, 
                                      within=c("Condition" , "Lure_Similarity"))))
 
-
 #Post-Hoc Comparisons (LDI) - (Considering effect of lure similarity on LDI)
 Lure_Similarity_Post_Hoc<- outlier_removed_MST%>%
           group_by(Condition) %>% 
@@ -400,6 +430,8 @@ Lure_Similarity_Post_Hoc<- outlier_removed_MST%>%
                           p.adjust.method= "bonferroni")
 options(scipen=1000000000) #Removes scientific notation
 Lure_Similarity_Post_Hoc
+
+# One-Way ANOVA for effect of (Appt) on LDI - No need to rerun
 ```
 
 ## 4.) Plotting
@@ -528,13 +560,13 @@ ggsave("Output/Responses_MST.eps", plot=responses_MST1, dpi=1200, width=26, heig
 Variables: Overall LDI (across lure bin difficulty) for rest, light, and vigorous conditions, and total IPAQ METs
 
 
-### *Data Cleaning
+### *Data Cleaning/Outlier Checking
 ```{r}
 # Data Cleaning
 
   # IPAQ Data Import
   set_project_directory()
-  IPAQ_Measure <-readxl::read_excel("Data/IPAQ_SF.xlsx")
+  IPAQ_Measure <-read.csv("Data/IPAQ_SF.csv")
   IPAQ_Measure <-IPAQ_Measure[1:19, ] 
   names(IPAQ_Measure)[names(IPAQ_Measure) == "SubID"] <- "Sub_ID"
   
@@ -552,7 +584,7 @@ Variables: Overall LDI (across lure bin difficulty) for rest, light, and vigorou
                     TotPAMET))
 
   # Removing participants 3, 10, and an extra row
-  B_M <- subset(B_M, subset = Sub_ID %!in% c(3, 10, 2227))
+  B_M <- subset(B_M, subset = Sub_ID %!in% c(3, 10,2227))
 
   # Converting from long to wide format (1 participant per row)
   B_M_Wide <- pivot_wider(
@@ -583,97 +615,13 @@ Variables: Overall LDI (across lure bin difficulty) for rest, light, and vigorou
   
   B_M_Wide_JS <- B_M_Wide %>% dplyr::select(Sub_ID:Lure.Discrimination.Index_Vigorous,
                                             TotPAMET:LDI_Vig_Rest)
-```
-
-
-### *Mixed Models (NOT REVIEWED/IN PAPER)
-
-This was exploratory and not reviewed or included in the paper. 
-
-```{r}
-# Cleaning Data
-
-  # Getting LDI/IPAQ data in long format
-  B_M_tmp <- B_M %>%
-    dplyr::select(c(Sub_ID, 
-                    Cond, 
-                    Lure.Discrimination.Index.Lure.Bin.1,
-                    Lure.Discrimination.Index.Lure.Bin.2,
-                    Lure.Discrimination.Index.Lure.Bin.3, 
-                    TotPAMET)) %>%
-    gather("Lure_Similarity", 
-           "Lure_Discrimination_Index",
-           Lure.Discrimination.Index.Lure.Bin.1:Lure.Discrimination.Index.Lure.Bin.3)
-
-  # recoding lure similarity
-  B_M_tmp$Lure_Similarity <-
-    ifelse(
-      B_M_tmp$Lure_Similarity == "Lure.Discrimination.Index.Lure.Bin.1",
-      "High",
-      ifelse(
-        B_M_tmp$Lure_Similarity == "Lure.Discrimination.Index.Lure.Bin.2",
-        "Medium",
-        ifelse(
-          B_M_tmp$Lure_Similarity == "Lure.Discrimination.Index.Lure.Bin.3",
-          "Low",
-          NA
-        )
-      )
-    )
-  
-    # merging with demographic data and selecting relevant rows
-    B_M_Final<- merge(B_M_tmp, Demographic_Table, by = "Sub_ID")
-    B_M_Final<- B_M_Final %>% dplyr::select(Sub_ID:Lure_Discrimination_Index, Age:Race)
-    B_M_Final<- merge(B_M_Final, RM_MST, by = c("Sub_ID", "Cond"))
-    
-    # creating z score TotPAMET Categories
-    mean_TotPAMET <- mean(B_M_Final$TotPAMET)
-    sd_TotPAMET <- sd(B_M_Final$TotPAMET)
-    B_M_Final$TotPAMET_z <- (B_M_Final$TotPAMET - mean_TotPAMET) / sd_TotPAMET
-    B_M_Final$TotPAMET_zcat <- ifelse(B_M_Final$TotPAMET_z < -1, "< -1",
-                                   ifelse(B_M_Final$TotPAMET_z > 1, "> 1",
-                                          "Between -1 and 1"))
-  
-    
-# Creating Mixed Models 
-
-  #Not Controlling for Other Variables------------------------------------------
-    
-  # Model 1: Fixed Predictors = Condition and Lure Similarity
-  model1 <- lmer(Lure_Discrimination_Index ~ Cond * Lure_Similarity + (1 | Sub_ID), data = B_M_Final)
-  summary(model1)
-  
-  # Model 2: Fixed Predictors = Condition, Lure Similarity, and TotPAMET
-  model2 <- lmer(Lure_Discrimination_Index ~ Cond * Lure_Similarity * TotPAMET + (1 | Sub_ID), 
-                 data = B_M_Final)
-  summary(model2)
-  
-  #Controlling for Other Variables------------------------------------------
-
-  # Model 3: Fixed Predictors = Condition and Lure Similarity and covariates
-  model3 <- lmer(Lure_Discrimination_Index ~ Age + Sex + BMI + Race + CESDScore + Education + 
-                   Recognition.Memory + Cond * Lure_Similarity + (1 | Sub_ID), data = B_M_Final)
-  summary(model3)
-  
-  
-  # Model 4: Fixed Predictors = Condition, Lure Similarity, and TotPAMET and covariates
-  model4 <- lmer(Lure_Discrimination_Index ~ Age + Sex + BMI + Race + CESDScore+ Education + 
-                   Recognition.Memory + Cond * Lure_Similarity * TotPAMET + (1 | Sub_ID), 
-                 data = B_M_Final)
-  summary(model4)
-  
-  # Model 5: Fixed Predictors = Condition, Lure Similarity, and TotPAMET (Categorical) and covariates
-  model5 <- lmer(Lure_Discrimination_Index ~ Age + Sex + BMI + Race + CESDScore+ Education + 
-                   Recognition.Memory + Cond * Lure_Similarity * TotPAMET_zcat + (1 | Sub_ID), 
-                 data = B_M_Final)
-  summary(model5)
-  
-  # Simple Slopes Analysis to Clarify Interactions (Cond by Lure similarity)
-  cat_plot(model4, pred = Cond, modx = Lure_Similarity, plot.points = TRUE, interval = TRUE)
   
 
-  # Simple Slopes Analysis to Clarify Interactions (Cond by Lure similarity by TotPAMET
-  cat_plot(model5, pred = Cond, modx = Lure_Similarity, mod2 = TotPAMET_zcat, plot.points = TRUE, interval = TRUE)
+  # Checking for outliers
+  z_data <- data.frame(scale(B_M_Wide_JS))
+  which(abs(z_data$TotPAMET) > 3) #2.689 (Participant 13)
+  which(abs(z_data$LDI_Light_Rest) > 3) 
+  which(abs(z_data$LDI_Vig_Rest) > 3)
 ```
 
 ### *Run correlation for light - rest vs. Total METS
@@ -693,9 +641,8 @@ p_value_lig <- round(light_cor$p.value, 3)
   geom_point(color = "black", shape = 16, size = 5) +  # Adjust size of points
   geom_smooth(method = "lm", se = FALSE, color = "red", size = 2) +  # Remove prediction interval and adjust line width
   labs(
-    title = "Change in MST Performance After Light Exercise vs. Total Baseline Physical Activity",
     x = "Total Physical Activity (METs)",
-    y = "Change in LDI (Light vs. Rest)"
+    y = "Lure Discrimination Index Difference Score\n(Light Exercise - Rest)"
   ) +
    annotate("text", x = Inf, y = -Inf, label = paste("r =", correlation_coef_lig, ", p =", p_value_lig), 
            hjust = 1.1, vjust = -10, size = 14, color = "black") +  # Add annotation
@@ -725,9 +672,8 @@ p_value_vig <- round(vig_cor$p.value, 3)
   geom_point(color = "black", shape = 16, size = 5) +  # Adjust size of points
   geom_smooth(method = "lm", se = FALSE, color = "red", size = 2) +  # Adjust width of trend line
   labs(
-    title = "Change in MST Performance After Vigorous Exercise vs. Total Baseline Physical Activity",
     x = "Total Physical Activity (METs)",
-    y = "Change in LDI (Vigorous vs. Rest)"
+    y = "Lure Discrimination Index Difference Score\n(Vigorous Exercise - Rest)"
   ) +
    annotate("text", x = Inf, y = -Inf, label = paste("r =", correlation_coef_vig, ", p =", p_value_vig), 
            hjust = 1.1, vjust = -10, size = 14, color = "black") +  # Add annotation
@@ -773,7 +719,8 @@ ggsave("Output/MSTCorr_Plots.eps",plot= cor_plots, dpi=1200,
            CV_RT, 
            post_CE_mean, 
            post_CO_mean, 
-           Sub_ID)
+           Sub_ID,
+           Appointment_Number)
 
   # Excluding Participants
   gradCPT_AOV<- subset(gradCPT_AOV, subset= Sub_ID%!in% c(16.4)) #2nd light appt removed
@@ -790,6 +737,12 @@ options(scipen=100)
 (dprime_Post_Hoc<- gradCPT_AOV %>%
   pairwise_t_test(dprime ~ Cond, paired= TRUE,
                           p.adjust.method= "bonferroni"))
+
+
+# One-Way ANOVA for effect of (Appt) on dprime
+options(scipen=100) 
+(dprime_AOV_Appt<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                        dv =dprime, within=Appointment_Number)))
 ```
 
 ### *Criterion
@@ -803,6 +756,11 @@ options(scipen=100)
 (criterion_Post_Hoc<- gradCPT_AOV %>%
   pairwise_t_test(criterion ~ Cond, paired= TRUE,
                           p.adjust.method= "bonferroni"))
+
+# One-Way ANOVA for effect of (Appt) on criterion
+options(scipen=100) 
+(criterion_AOV_Appt<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                           dv =criterion, within=Appointment_Number)))
 ```
 
 ### *Commission Rate
@@ -816,6 +774,11 @@ options(scipen=100)
 (cr_Post_Hoc<- gradCPT_AOV %>%
   pairwise_t_test(commission_rate ~ Cond, paired= TRUE,
                           p.adjust.method= "bonferroni"))
+
+# One-Way ANOVA for effect of (Appt) on commission rate
+options(scipen=100) 
+(cr_AOV_Appt<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                    dv =commission_rate, within=Appointment_Number))) 
 
 
 ```
@@ -831,6 +794,11 @@ options(scipen=100)
 (or_Post_Hoc<- gradCPT_AOV%>%
   pairwise_t_test(omission_rate ~ Cond, paired= TRUE,
                           p.adjust.method= "bonferroni"))
+
+# One-Way ANOVA for effect of (Appt) on omission rate
+options(scipen=100)
+(or_AOV_Appt<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                    dv =omission_rate, within=Appointment_Number))) 
 ```
 
 ### *CV RT
@@ -844,6 +812,11 @@ options(scipen=100)
 (CV_RT_Post_Hoc<- gradCPT_AOV%>%
   pairwise_t_test(CV_RT ~ Cond, paired= TRUE,
                           p.adjust.method= "bonferroni"))
+
+# One-Way ANOVA for effect of (Appt) on CV RT
+options(scipen=100) 
+(CV_RT_AOV<- get_anova_table(anova_test(data = gradCPT_AOV, wid=Sub_ID, 
+                                    dv =CV_RT, within=Appointment_Number)))
 ```
 
 ## 2.) Assumption Verification
@@ -989,6 +962,13 @@ options(scipen=100)
 (or_Post_Hoc<- outlier_removed_omission_rate%>%
   pairwise_t_test(omission_rate ~ Cond, paired= TRUE,
                           p.adjust.method= "bonferroni"))
+
+# One-Way ANOVA for effect of (Condition) on omission rate
+options(scipen=100) 
+(or_AOV_Appt<- get_anova_table(anova_test(data = outlier_removed_omission_rate,
+                                    wid=Sub_ID, 
+                                    dv =omission_rate, 
+                                    within=Appointment_Number)))
 ```
 
 ### *CV RT
@@ -1542,5 +1522,11 @@ options(scipen = 100)
     p.adjust.method = "none"
   ))
 ```
+
+
+
+
+
+
 
 
